@@ -46,6 +46,7 @@ BLERemoteCharacteristic::BLERemoteCharacteristic(
 	m_charProp       = charProp;
 	m_pRemoteService = pRemoteService;
 	m_notifyCallback = nullptr;
+    m_pCallbacks = nullptr;
 
 	retrieveDescriptors(); // Get the descriptors for this characteristic
 	ESP_LOGD(LOG_TAG, "<< BLERemoteCharacteristic");
@@ -59,6 +60,7 @@ BLERemoteCharacteristic::~BLERemoteCharacteristic() {
 	removeDescriptors();   // Release resources for any descriptor information we may have allocated.
 } // ~BLERemoteCharacteristic
 
+BLERemoteCharacteristicCallbacks::~BLERemoteCharacteristicCallbacks() {}
 
 /**
  * @brief Does the characteristic support broadcasting?
@@ -169,6 +171,12 @@ void BLERemoteCharacteristic::gattClientEventHandler(esp_gattc_cb_event_t event,
 				ESP_LOGD(LOG_TAG, "Invoking callback for notification on characteristic %s", toString().c_str());
 				m_notifyCallback(this, evtParam->notify.value, evtParam->notify.value_len, evtParam->notify.is_notify);
 			} // End we have a callback function ...
+
+            // Alternative nnotification callback invoking through callback interface class
+            if (m_pCallbacks != nullptr) {
+				ESP_LOGD(LOG_TAG, "Invoking callback for notification on characteristic %s", toString().c_str());
+				m_pCallbacks->onNotify(this, evtParam->notify.value, evtParam->notify.value_len, evtParam->notify.is_notify);
+			}
 			break;
 		} // ESP_GATTC_NOTIFY_EVT
 
@@ -483,6 +491,55 @@ void BLERemoteCharacteristic::registerForNotify(notify_callback notifyCallback, 
 
 	ESP_LOGD(LOG_TAG, "<< registerForNotify()");
 } // registerForNotify
+
+
+/**
+ * @brief Set the callback handlers for this characteristic.
+ * @param [in] pCallbacks An instance of a callbacks structure used to define any callbacks for the characteristic.
+ */
+void BLERemoteCharacteristic::setCallbacks(BLERemoteCharacteristicCallbacks* pCallbacks, bool notifications) {
+	ESP_LOGD(LOG_TAG, ">> registerForNotify(): %s", toString().c_str());
+
+	m_pCallbacks = pCallbacks;   // Save the notification callback.
+
+	m_semaphoreRegForNotifyEvt.take("registerForNotify");
+
+	if (pCallbacks != nullptr) {   // If we have a callback function, then this is a registration.
+		esp_err_t errRc = ::esp_ble_gattc_register_for_notify(
+			m_pRemoteService->getClient()->getGattcIf(),
+			*m_pRemoteService->getClient()->getPeerAddress().getNative(),
+			getHandle()
+		);
+
+		if (errRc != ESP_OK) {
+			ESP_LOGE(LOG_TAG, "esp_ble_gattc_register_for_notify: rc=%d %s", errRc, GeneralUtils::errorToString(errRc));
+		}
+
+		uint8_t val[] = {0x01, 0x00};
+		if(!notifications) val[0] = 0x02;
+		BLERemoteDescriptor* desc = getDescriptor(BLEUUID((uint16_t)0x2902));
+		desc->writeValue(val, 2);
+	} // End Register
+	else {   // If we weren't passed a callback function, then this is an unregistration.
+		esp_err_t errRc = ::esp_ble_gattc_unregister_for_notify(
+			m_pRemoteService->getClient()->getGattcIf(),
+			*m_pRemoteService->getClient()->getPeerAddress().getNative(),
+			getHandle()
+		);
+
+		if (errRc != ESP_OK) {
+			ESP_LOGE(LOG_TAG, "esp_ble_gattc_unregister_for_notify: rc=%d %s", errRc, GeneralUtils::errorToString(errRc));
+		}
+
+		uint8_t val[] = {0x00, 0x00};
+		BLERemoteDescriptor* desc = getDescriptor((uint16_t)0x2902);
+		desc->writeValue(val, 2);
+	} // End Unregister
+
+	m_semaphoreRegForNotifyEvt.wait("registerForNotify");
+
+	ESP_LOGD(LOG_TAG, "<< registerForNotify()");
+} // setCallbacks
 
 
 /**

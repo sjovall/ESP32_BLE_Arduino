@@ -19,6 +19,7 @@
 #include "BLEUUID.h"
 #include "FreeRTOS.h"
 
+class BLERemoteCharacteristicCallbacks;
 class BLERemoteService;
 class BLERemoteDescriptor;
 typedef void (*notify_callback)(BLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify);
@@ -46,6 +47,7 @@ public:
 	uint16_t    readUInt16();
 	uint32_t    readUInt32();
 	void        registerForNotify(notify_callback _callback, bool notifications = true);
+    void setCallbacks(BLERemoteCharacteristicCallbacks* pCallbacks, bool notifications);
 	void        writeValue(uint8_t* data, size_t length, bool response = false);
 	void        writeValue(std::string newValue, bool response = false);
 	void        writeValue(uint8_t newValue, bool response = false);
@@ -76,9 +78,20 @@ private:
 	std::string          m_value;
 	uint8_t 			 *m_rawData;
 	notify_callback		 m_notifyCallback;
+    BLERemoteCharacteristicCallbacks* m_pCallbacks;
 
 	// We maintain a map of descriptors owned by this characteristic keyed by a string representation of the UUID.
 	std::map<std::string, BLERemoteDescriptor*> m_descriptorMap;
 }; // BLERemoteCharacteristic
+
+/**
+ * @brief Callbacks that can be associated with a %BLE remote characteristic to inform of events.
+ */
+class BLERemoteCharacteristicCallbacks {
+public:
+	virtual ~BLERemoteCharacteristicCallbacks();
+    virtual void onNotify(BLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify);
+};
+
 #endif /* CONFIG_BT_ENABLED */
 #endif /* COMPONENTS_CPP_UTILS_BLEREMOTECHARACTERISTIC_H_ */
